@@ -29,7 +29,6 @@ fi
 CONF_FILE="/etc/asterisk/rpt.conf"
 BASE_URL="https://dev.gentoo.org/~anarchy/asl3-scripts"
 TARGET_DIR="/etc/asterisk/local"
-FILES_TO_DOWNLOAD="halt.sh reboot.sh sayip.sh saypublicip.sh speaktext.sh halt.ulaw reboot.ulaw ip-address.ulaw public-ip-address.ulaw"
 
 # Create target directory if it doesn't exist
 mkdir -p "$TARGET_DIR" || {
@@ -43,17 +42,36 @@ cd "$TARGET_DIR" || {
     exit 1
 }
 
-for FILE in $FILES_TO_DOWNLOAD; do
-    if [ ! -f "$FILE" ]; then
-        echo "Downloading $FILE..."
-        if ! curl -s -O "$BASE_URL/$FILE"; then
-            echo "Failed to download $FILE"
-            exit 1
+CHECKSUM_URL="$BASE_URL/checksums.sha256"
+CHECKSUM_FILE="checksums.sha256"
+DOWNLOAD_DIR="."  # Adjust if needed
+
+# Download the checksum file
+curl -s -o "$CHECKSUM_FILE" "$CHECKSUM_URL"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to download checksum file."
+    exit 1
+fi
+
+# Verify all our files that we download to ensure they have not been updated.
+while read -r expected_hash filename; do
+    if [ -f "$DOWNLOAD_DIR/$filename" ]; then
+        actual_hash=$(sha256sum "$DOWNLOAD_DIR/$filename" | awk '{print $1}')
+        if [ "$expected_hash" = "$actual_hash" ]; then
+            echo "$filename: OK"
+        else
+            echo "$filename: Checksum mismatch, re-downloading..."
+            rm -f "$DOWNLOAD_DIR/$filename"
+            curl -s -o "$DOWNLOAD_DIR/$filename" "$BASE_URL/$filename"
         fi
     else
-        echo "$FILE already exists, skipping download."
+        echo "$filename: Missing, downloading..."
+        curl -s -o "$DOWNLOAD_DIR/$filename" "$BASE_URL/$filename"
     fi
-done
+done < "$CHECKSUM_FILE"
+
+# Cleanup the checksum as we do not need to store it
+rm $CHECKSUM_FILE
 
 # Set permissions for the downloaded files
 chmod 750 *.sh
